@@ -185,3 +185,7 @@ find_fuel = function(rxn, lb = 1e5, ub = 1e8, ore_budget = 1000000000000) {
 }
 
 find_fuel(ex3)
+find_fuel(ex4)
+find_fuel(ex5)
+
+find_fuel(input)
