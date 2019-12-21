@@ -127,8 +127,8 @@ intcode = R6::R6Class(
         mode = 0
       } else {
         mode = parse[2] %>% 
-          str_pad(self$n_params[opcode], pad = "0") %>% 
-          str_split("") %>% .[[1]] %>%
+          stringr::str_pad(self$n_params[opcode], pad = "0") %>% 
+          stringr::str_split("") %>% .[[1]] %>%
           as.integer()
       }
       
