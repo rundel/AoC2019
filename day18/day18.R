@@ -24,77 +24,185 @@ df_to_map = function(df) {
   matrix(df$z, nrow = max(df$y), ncol = max(df$x))
 }
 
-available_keys = function(df) {
+ex1 = read_map(here::here("day18/ex1.txt")) %>% map_to_df()
+ex2 = read_map(here::here("day18/ex2.txt")) %>% map_to_df()
+ex3 = read_map(here::here("day18/ex3.txt")) %>% map_to_df()
+ex4 = read_map(here::here("day18/ex4.txt")) %>% map_to_df()
+ex5 = read_map(here::here("day18/ex5.txt")) %>% map_to_df()
+input = read_map(here::here("day18/input.txt")) %>% map_to_df()
+
+
+
+make_symm = function(m) {
+  m[upper.tri(m)] <- t(m)[upper.tri(m)]
+  m
+}
+
+get_mats = function(df) {
   d = df %>%
-    filter(z != "#") %>%
-    filter(!z %in% LETTERS)
+    filter(z != "#")
   
-  loc = which(d$z == "@")
-  keys = which(d$z %in% letters)
+  locs = which(d$z %in% c("@", letters))
+  name = d$z[locs]
   
   adj = dist(d[,c("x","y")]) %>%
     as.matrix() 
   adj[adj>1] = 0
   
   g = igraph::graph_from_adjacency_matrix(adj)
-  p = suppressWarnings(
-    igraph::shortest_paths(g, loc, keys)
+  
+  dist_mat = matrix(NA, length(locs), length(locs), dimnames = list(name,name))
+  gate_mat = matrix(NA, length(locs), length(locs), dimnames = list(name,name))
+  
+  for(i in seq_along(locs)) {
+    sub = 1:length(locs)
+    
+    p = igraph::shortest_paths(g, locs[i], locs[sub])
+    dist_mat[sub, i] = map_dbl(p$vpath, ~length(.x)-1)
+    gate_mat[sub, i] = map_chr(
+      p$vpath,
+      function(path) {
+        steps = d$z[path]
+        paste(steps[steps %in% LETTERS], collapse = "")
+      }
+    )
+  }
+  
+  list(
+    dist_mat = make_symm(dist_mat),
+    gate_mat = make_symm(gate_mat)
   )
-  
-  
-  tibble(
-    key = d$z[keys],
-    steps = map_int(p$vpath, length)-1,
-    keys_in_path = map_int(p$vpath, ~ sum(.x %in% keys))
-  ) %>%
-    filter(keys_in_path == 1) %>%
-    select(-keys_in_path)
 }
 
-move = function(df, key) {
-  #print(df_to_map(df))
-  df %>%
-    mutate(
-      z = ifelse(z == "@", ".", z),
-      z = ifelse(z == key, "@", z),
-      z = ifelse(z == toupper(key), ".", z),
+mats = get_mats(ex2)
+
+get_mask = function(pos, mats, keys="") {
+  if (keys == "")
+    1*(mats$gate_mat[pos,] == keys)
+  else
+    1*map_lgl(mats$gate_mat[pos,], str_detect, pattern = glue::glue("^[{keys}]+$")) +
+    1*(mats$gate_mat[pos,] == "")
+}
+
+available_keys = function(pos, mats, keys="") {
+  all_keys = mats$dist_mat[pos,] * get_mask(pos, mats, keys) 
+  all_keys[all_keys != 0]
+}
+
+del_rc = function(mat, n) {
+  i = which(row.names(mat) == n)
+  mat = mat[-i,,drop = FALSE]
+  mat[,-i, drop = FALSE]
+}
+
+del_node = function(mats, node) {
+  list(
+    dist_mat = del_rc(mats$dist_mat, node),
+    gate_mat = del_rc(mats$gate_mat, node)
+  )
+}
+
+sort_keys = function(keys) {
+  str_split(keys, "") %>%
+    map_chr(
+      ~ sort(.x) %>% paste(collapse="")
     )
 }
 
 
-
 solve = function(df) {
-  avail = available_keys(df) 
-  #print(avail)
-  #print(df_to_map(df))
   
-  if (nrow(avail) == 0) {
-    return(0)
+  n = sum(df$z %in% letters)
+  
+  state = list(
+    mats = get_mats(df),
+    pos = "@",
+    keys = "",
+    steps = 0
+  )
+  res = list(state)
+
+  
+  for(i in seq_len(n)) {
+    moves = map(
+      res,
+      function(state) {
+        ak = available_keys(state$pos, state$mats, state$keys)
+        map2(
+          names(ak), ak,
+          function(move, steps) {
+            list(
+              mats = del_node(state$mats, state$pos),
+              pos = move,
+              keys = paste0(state$keys, toupper(move)),
+              steps = state$steps + steps
+            )
+          }
+        )
+      }
+    )
+    
+    moves = flatten(moves)
+    
+    orig_keys = map_chr(moves, "keys")
+    keys = paste(
+      map_chr(moves, "keys") %>% sort_keys(),
+      map_chr(moves, "pos"),
+      sep = ":"
+    )
+    steps = map_dbl(moves, "steps")
+    
+    dupes = keys[duplicated(keys)] %>% unique()
+    to_rm = c() 
+    
+    for(dupe in dupes) {
+      idx = which(keys == dupe)
+      best = idx[which.min(steps[idx])]
+      to_rm = append(to_rm, idx[idx!=best])
+    }
+    #print(orig_keys)
+    #print(keys)
+    #print(steps)
+    #print(to_rm)
+    
+    if (length(to_rm) != 0)
+      moves = moves[-to_rm]
+    
+    res = moves
+    #print(map_chr(res, "keys"))
   }
   
-  pmap(
-    avail,
-    function(key, steps) {
-      new_df = move(df, key)
-      steps + solve(new_df)
-    }
-  ) %>% unlist()
+  
+  map_dbl(res, "steps") %>%
+    setNames(map_chr(res, "keys"))
 }
 
-ex1 = read_map(here::here("day18/ex1.txt")) %>% map_to_df()
-ex2 = read_map(here::here("day18/ex2.txt")) %>% map_to_df()
-ex3 = read_map(here::here("day18/ex3.txt")) %>% map_to_df()
-ex4 = read_map(here::here("day18/ex4.txt")) %>% map_to_df()
-ex5 = read_map(here::here("day18/ex5.txt")) %>% map_to_df()
 
 
-solve(ex1) %>% min()
-solve(ex2) %>% min()
-solve(ex3) %>% min()
-solve(ex4) %>% min()
-solve(ex5) %>% min()
 
 
-z = solve(input) 
-min(z)
 
+
+
+solve(ex1) # 8
+solve(ex2) # 86
+solve(ex3) # 132
+solve(ex4) # 136
+solve(ex5) # 81
+
+solve(input) 
+
+
+### Part2
+
+input_part2 = {
+  m = read_map(here::here("day18/input.txt"))
+  orig = which(m == "@", arr.ind = TRUE)
+  y = orig[1]
+  x = orig[2]
+  
+  m[y-1,x+(-1:1)] = "1#2"
+  m[y+0,x+(-1:1)] = "###"
+  m[y+1,x+(-1:1)] = "3#4"
+  map_to_df(m)
+}
